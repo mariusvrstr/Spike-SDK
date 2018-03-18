@@ -15,6 +15,7 @@ namespace Spike.SDK.General.WCF
     using System.ServiceModel;
     using System.ServiceModel.Channels;
     using System.Threading;
+    using Instrumentation.Logging;
 
     public class ServiceClientWrapper<TClient, TIService> : IDisposable
             where TClient : ClientBase<TIService>, TIService
@@ -36,7 +37,7 @@ namespace Spike.SDK.General.WCF
         {
             get
             {
-                return this._serviceClient = this._serviceClient ?? this.CreateClient();
+                return _serviceClient = _serviceClient ?? CreateClient();
             }
         }
 
@@ -65,22 +66,23 @@ namespace Spike.SDK.General.WCF
             {
                 try
                 {
-                    if (!this.ServiceClient.State.IsReady())
+                    if (!ServiceClient.State.IsReady())
                     {
-                        this.DisposeClient();
+                        DisposeClient();
 
-                        if (!this.ServiceClient.State.IsReady())
+                        if (!ServiceClient.State.IsReady())
                         {
-                            throw new CommunicationObjectFaultedException(string.Format("WCF Client state is not valid. Connection Status [{0}]", this.ServiceClient.State));
+                            throw new CommunicationObjectFaultedException(
+                                $"WCF Client state is not valid. Connection Status [{ServiceClient.State}]");
                         }
                     }
 
-                    response = serviceCall.Invoke(this.ServiceClient);
+                    response = serviceCall.Invoke(ServiceClient);
                     completed = true;
                 }
                 catch (CommunicationException comsException)
                 {
-                    Logging logger = LogFactory.Create();
+                    var logger = LogFactory.Create();
                     exception = comsException;
                     if (exceptionHandler != null)
                     {
@@ -95,33 +97,34 @@ namespace Spike.SDK.General.WCF
                     }
 
                     errors++;
-                    var logErrorMessage = string.Format("WCF Operation Failure: Service [{0}].[{1}] Attempt ({2}/{3}). Exception [{4}]", typeof(TClient), serviceCall.Method.Name, errors, retryAttempts, exception.Message);
+                    var logErrorMessage =
+                        $"WCF Operation Failure: Service [{typeof(TClient)}].[{serviceCall.Method.Name}] Attempt ({errors}/{retryAttempts}). Exception [{exception.Message}]";
                     logger.Info(logErrorMessage);
 
-                    if (retryAttempts > 1)
-                    {
-                        var logSleepMessage = string.Format("Retry cooldown initiated ({0}s)", RetryCoolDownInSeconds);
-                        logger.Info(logSleepMessage);
+                    if (retryAttempts <= 1) continue;
 
-                        Thread.Sleep(new TimeSpan(0, 0, RetryCoolDownInSeconds));
-                    }
+                    var logSleepMessage = $"Retry cooldown initiated ({RetryCoolDownInSeconds}s)";
+                    logger.Info(logSleepMessage);
+
+                    Thread.Sleep(new TimeSpan(0, 0, RetryCoolDownInSeconds));
                 }
                 finally
                 {
                     if (!completed)
                     {
-                        this.DisposeClient();
+                        DisposeClient();
                     }
                     else
                     {
-                        this.ServiceClient.Close();
+                        ServiceClient.Close();
                     }
                 }
             }
 
             if (!completed)
             {
-                throw exception ?? new CommunicationException(string.Format("WCF Operation Failure: Service [{0}].[{1}]", typeof(TClient), serviceCall.Method.Name));
+                throw exception ?? new CommunicationException(
+                          $"WCF Operation Failure: Service [{typeof(TClient)}].[{serviceCall.Method.Name}]");
             }
 
             return response;
@@ -129,7 +132,7 @@ namespace Spike.SDK.General.WCF
 
         public void Dispose()
         {
-            this.DisposeClient();
+            DisposeClient();
         }
 
         protected virtual TClient CreateClient()
@@ -144,31 +147,31 @@ namespace Spike.SDK.General.WCF
 
         private void DisposeClient()
         {
-            if (this._serviceClient == null)
+            if (_serviceClient == null)
             {
                 return;
             }
 
             try
             {
-                switch (this._serviceClient.State)
+                switch (_serviceClient.State)
                 {
                     case CommunicationState.Faulted:
-                        this._serviceClient.Abort();
+                        _serviceClient.Abort();
                         break;
 
                     default:
-                        this._serviceClient.Close();
+                        _serviceClient.Close();
                         break;
                 }
             }
             catch
             {
-                this._serviceClient.Abort();
+                _serviceClient.Abort();
             }
             finally
             {
-                this._serviceClient = null;
+                _serviceClient = null;
             }
         }
     }
